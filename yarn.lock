@@ -4499,9 +4499,9 @@ extsprintf@^1.2.0:
   resolved "https://registry.yarnpkg.com/extsprintf/-/extsprintf-1.4.0.tgz#e2689f8f356fad62cca65a3a91c5df5f9551692f"
   integrity sha1-4mifjzVvrWLMplo6kcXfX5VRaS8=
 
-"facemask-plugin@https://s3-us-west-2.amazonaws.com/faces-internal.streamlabs.com/facemask-plugin-deployment/facemask-plugin-0.8.9.tar.gz":
-  version "0.8.9"
-  resolved "https://s3-us-west-2.amazonaws.com/faces-internal.streamlabs.com/facemask-plugin-deployment/facemask-plugin-0.8.9.tar.gz#1fb1639229379eb552e1d1c5ddde0952da37cf63"
+"facemask-plugin@https://s3-us-west-2.amazonaws.com/faces-internal.streamlabs.com/facemask-plugin-deployment/facemask-plugin-0.9.1.tar.gz":
+  version "0.9.1"
+  resolved "https://s3-us-west-2.amazonaws.com/faces-internal.streamlabs.com/facemask-plugin-deployment/facemask-plugin-0.9.1.tar.gz#43bc9099646da3a4b38a0a690297d17a876bdf1a"
 
 fast-deep-equal@^1.0.0:
   version "1.1.0"
@@ -7366,9 +7366,9 @@ object.pick@^1.3.0:
   dependencies:
     isobject "^3.0.1"
 
-"obs-studio-node@https://obsstudionodes3.streamlabs.com/obs-studio-node-v0.4.36-iojs-v2.0.8.tar.gz":
+"obs-studio-node@https://obsstudionodes3.streamlabs.com/obs-studio-node-v0.4.39-iojs-v2.0.8.tar.gz":
   version "0.3.99"
-  resolved "https://obsstudionodes3.streamlabs.com/obs-studio-node-v0.4.36-iojs-v2.0.8.tar.gz#e0d7839322a13149b9136d5af75ebf8439a88cba"
+  resolved "https://obsstudionodes3.streamlabs.com/obs-studio-node-v0.4.39-iojs-v2.0.8.tar.gz#890982820d36bebeea26b63234530d0af83576fd"
 
 observable-to-promise@^0.5.0:
   version "0.5.0"
@@ -9384,10 +9384,10 @@ stream-shift@^1.0.0:
   resolved "https://registry.yarnpkg.com/stream-shift/-/stream-shift-1.0.0.tgz#d5c752825e5367e786f78e18e445ea223a155952"
   integrity sha1-1cdSgl5TZ+eG944Y5EXqIjoVWVI=
 
-streamlabs-beaker@^0.4.97:
-  version "0.4.97"
-  resolved "https://registry.yarnpkg.com/streamlabs-beaker/-/streamlabs-beaker-0.4.97.tgz#17ebdce3196bcdece9888ae8cd279c675ee2a430"
-  integrity sha512-9tH6rghkCJGo/Wq50fdgsoSM/WUNtRFUwiSvU/yXq1OWoLlV55ro6yE6BNZiIOKcwdF61Lt+rf+DN0cd/xwrIg==
+streamlabs-beaker@^0.4.111:
+  version "0.4.111"
+  resolved "https://registry.yarnpkg.com/streamlabs-beaker/-/streamlabs-beaker-0.4.111.tgz#d66cbc4d05c055dbb793e10750f4be954b3f693c"
+  integrity sha512-xxd54B/5MpJd1kv5xMOYsYNdG0p13R6mWr/hL5uHMWDWGFHRKhnol+q72qN6F0wa5JJG9l9GhrHM2w9ncI5LHw==
 
 string-argv@^0.0.2:
   version "0.0.2"

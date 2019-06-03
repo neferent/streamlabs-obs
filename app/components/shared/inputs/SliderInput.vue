@@ -7,7 +7,7 @@
     :data-name="options.name"
   >
     <slider
-      :value="value"
+      :value="localValue"
       @input="value => updateLocalValue(value)"
       :max="max"
       :min="min"
@@ -45,7 +45,5 @@
 .slider-input {
   width: 50px;
   margin-left: 16px;
-  position: relative;
-  top: -8px;
 }
 </style>
