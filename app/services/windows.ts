@@ -4,7 +4,7 @@
 import cloneDeep from 'lodash/cloneDeep';
 
 import Main from 'components/windows/Main.vue';
-import Settings from 'components/windows/Settings.vue';
+import Settings from 'components/windows/settings/Settings.vue';
 import FFZSettings from 'components/windows/FFZSettings.vue';
 import SourcesShowcase from 'components/windows/SourcesShowcase.vue';
 import SceneTransitions from 'components/windows/SceneTransitions.vue';
@@ -14,7 +14,7 @@ import NameScene from 'components/windows/NameScene.vue';
 import NameFolder from 'components/windows/NameFolder.vue';
 import SourceProperties from 'components/windows/SourceProperties.vue';
 import SourceFilters from 'components/windows/SourceFilters.vue';
-import AddSourceFilter from 'components/windows/AddSourceFilter.vue';
+import AddSourceFilter from 'components/windows/AddSourceFilter';
 import EditStreamInfo from 'components/windows/EditStreamInfo.vue';
 import AdvancedAudio from 'components/windows/AdvancedAudio.vue';
 import Notifications from 'components/windows/Notifications.vue';
@@ -22,13 +22,17 @@ import Troubleshooter from 'components/windows/Troubleshooter.vue';
 import Blank from 'components/windows/Blank.vue';
 import ManageSceneCollections from 'components/windows/ManageSceneCollections.vue';
 import RecentEvents from 'components/windows/RecentEvents.vue';
+import GameOverlayEventFeed from 'components/windows/GameOverlayEventFeed';
 import Projector from 'components/windows/Projector.vue';
 import MediaGallery from 'components/windows/MediaGallery.vue';
 import PlatformAppPopOut from 'components/windows/PlatformAppPopOut.vue';
-import FacemaskSettings from 'components/windows/FacemaskSettings.vue';
 import EditTransform from 'components/windows/EditTransform';
+import EventFilterMenu from 'components/windows/EventFilterMenu';
+import AdvancedStatistics from 'components/windows/AdvancedStatistics';
 import OverlayWindow from 'components/windows/OverlayWindow.vue';
 import OverlayPlaceholder from 'components/windows/OverlayPlaceholder';
+import BrowserSourceInteraction from 'components/windows/BrowserSourceInteraction';
+import YoutubeStreamStatus from 'components/platforms/youtube/YoutubeStreamStatus';
 import { mutation, StatefulService } from 'services/core/stateful-service';
 import electron from 'electron';
 import Vue from 'vue';
@@ -38,6 +42,8 @@ import { Subject } from 'rxjs';
 import BitGoal from 'components/widgets/goal/BitGoal.vue';
 import DonationGoal from 'components/widgets/goal/DonationGoal.vue';
 import SubGoal from 'components/widgets/goal/SubGoal.vue';
+import StarsGoal from 'components/widgets/goal/StarsGoal.vue';
+import SupporterGoal from 'components/widgets/goal/SupporterGoal.vue';
 import ChatBox from 'components/widgets/ChatBox.vue';
 import FollowerGoal from 'components/widgets/goal/FollowerGoal.vue';
 import ViewerCount from 'components/widgets/ViewerCount.vue';
@@ -47,9 +53,12 @@ import Credits from 'components/widgets/Credits.vue';
 import EventList from 'components/widgets/EventList.vue';
 import TipJar from 'components/widgets/TipJar.vue';
 import SponsorBanner from 'components/widgets/SponsorBanner.vue';
-import MediaShare from 'components/widgets/MediaShare.vue';
+import MediaShare from 'components/widgets/MediaShare';
 import AlertBox from 'components/widgets/AlertBox.vue';
 import SpinWheel from 'components/widgets/SpinWheel.vue';
+
+import PerformanceMetrics from 'components/PerformanceMetrics.vue';
+import { throttle } from 'lodash-decorators';
 
 const { ipcRenderer, remote } = electron;
 const BrowserWindow = remote.BrowserWindow;
@@ -81,14 +90,19 @@ export function getComponents() {
     RecentEvents,
     MediaGallery,
     PlatformAppPopOut,
-    FacemaskSettings,
     EditTransform,
     OverlayWindow,
     OverlayPlaceholder,
-
+    PerformanceMetrics,
+    BrowserSourceInteraction,
+    EventFilterMenu,
+    GameOverlayEventFeed,
+    AdvancedStatistics,
     BitGoal,
     DonationGoal,
     FollowerGoal,
+    StarsGoal,
+    SupporterGoal,
     ChatBox,
     ViewerCount,
     DonationTicker,
@@ -101,10 +115,11 @@ export function getComponents() {
     MediaShare,
     AlertBox,
     SpinWheel,
+    YoutubeStreamStatus,
   };
 }
 
-export interface IWindowOptions {
+export interface IWindowOptions extends Electron.BrowserWindowConstructorOptions {
   componentName: string;
   queryParams?: Dictionary<any>;
   size?: {
@@ -121,15 +136,14 @@ export interface IWindowOptions {
   preservePrevWindow?: boolean;
   prevWindowOptions?: IWindowOptions;
   isFullScreen?: boolean;
-  height?: number;
-  width?: number;
-  webPreferences?: { offscreen: boolean };
-  transparent?: boolean;
 
   // Will be true when the UI is performing animations, transitions, or property changes that affect
   // the display of elements we cannot draw over. During this time such elements, for example
   // BrowserViews and the OBS Display, will be hidden until the operation is complete.
   hideStyleBlockers: boolean;
+  // Necessary to hide chat when switching the chat URL to prevent a crash caused by rendering BrowsweWindows
+  // when the loaded url changes
+  hideChat: boolean;
 }
 
 interface IWindowsState {
@@ -141,6 +155,7 @@ const DEFAULT_WINDOW_OPTIONS: IWindowOptions = {
   scaleFactor: 1,
   isShown: true,
   hideStyleBlockers: false,
+  hideChat: false,
 };
 
 export class WindowsService extends StatefulService<IWindowsState> {
@@ -155,12 +170,14 @@ export class WindowsService extends StatefulService<IWindowsState> {
       scaleFactor: 1,
       isShown: true,
       hideStyleBlockers: true,
+      hideChat: false,
       title: `Streamlabs OBS - Version: ${remote.process.env.SLOBS_VERSION}`,
     },
     child: {
       componentName: '',
       scaleFactor: 1,
       hideStyleBlockers: false,
+      hideChat: false,
       isShown: false,
     },
   };
@@ -185,13 +202,18 @@ export class WindowsService extends StatefulService<IWindowsState> {
     this.windows.child.on('move', () => this.updateScaleFactor('child'));
   }
 
+  @throttle(500)
   private updateScaleFactor(windowId: string) {
     const window = this.windows[windowId];
-    if (window) {
+    if (window && !window.isDestroyed()) {
       const bounds = window.getBounds();
-      const currentDisplay = electron.screen.getDisplayMatching(bounds);
+      const currentDisplay = electron.remote.screen.getDisplayMatching(bounds);
       this.UPDATE_SCALE_FACTOR(windowId, currentDisplay.scaleFactor);
     }
+  }
+
+  getWindowIdFromElectronId(electronWindowId: number) {
+    return Object.keys(this.windows).find(win => this.windows[win].id === electronWindowId);
   }
 
   showWindow(options: Partial<IWindowOptions>) {
@@ -207,9 +229,10 @@ export class WindowsService extends StatefulService<IWindowsState> {
      * to workaround.
      */
     if (options.size && !remote.process.env.CI) {
-      const { width: screenWidth, height: screenHeight } = electron.screen.getDisplayMatching(
-        this.windows.main.getBounds(),
-      ).workAreaSize;
+      const {
+        width: screenWidth,
+        height: screenHeight,
+      } = electron.remote.screen.getDisplayMatching(this.windows.main.getBounds()).workAreaSize;
 
       const SCREEN_PERCENT = 0.75;
 
@@ -228,7 +251,7 @@ export class WindowsService extends StatefulService<IWindowsState> {
   getMainWindowDisplay() {
     const window = this.windows.main;
     const bounds = window.getBounds();
-    return electron.screen.getDisplayMatching(bounds);
+    return electron.remote.screen.getDisplayMatching(bounds);
   }
 
   closeChildWindow() {
@@ -281,15 +304,16 @@ export class WindowsService extends StatefulService<IWindowsState> {
 
     const newWindow = (this.windows[windowId] = new BrowserWindow({
       frame: false,
-      width: (options.size && options.size.width) || 400,
-      height: (options.size && options.size.height) || 400,
-      minWidth: options.size && options.size.minWidth,
-      minHeight: options.size && options.size.minHeight,
-      title: options.title || 'New Window',
+      width: 400,
+      height: 400,
+      title: 'New Window',
       backgroundColor: '#17242D',
+      webPreferences: { nodeIntegration: true, webviewTag: true },
+      ...options,
+      ...options.size,
     }));
 
-    newWindow.setMenu(null);
+    newWindow.removeMenu();
     newWindow.on('closed', () => {
       this.windowDestroyed.next(windowId);
       delete this.windows[windowId];
@@ -299,9 +323,7 @@ export class WindowsService extends StatefulService<IWindowsState> {
     this.updateScaleFactor(windowId);
     newWindow.on('move', () => this.updateScaleFactor(windowId));
 
-    if (Util.isDevMode()) {
-      newWindow.webContents.openDevTools({ mode: 'detach' });
-    }
+    if (Util.isDevMode()) newWindow.webContents.openDevTools({ mode: 'detach' });
 
     const indexUrl = remote.getGlobal('indexUrl');
     newWindow.loadURL(`${indexUrl}?windowId=${windowId}`);
@@ -370,6 +392,10 @@ export class WindowsService extends StatefulService<IWindowsState> {
     this.UPDATE_HIDE_STYLE_BLOCKERS(windowId, hideStyleBlockers);
   }
 
+  updateHideChat(windowId: string, hideChat: boolean) {
+    this.UPDATE_HIDE_CHAT(windowId, hideChat);
+  }
+
   updateChildWindowOptions(optionsPatch: Partial<IWindowOptions>) {
     const newOptions: IWindowOptions = {
       ...DEFAULT_WINDOW_OPTIONS,
@@ -418,6 +444,11 @@ export class WindowsService extends StatefulService<IWindowsState> {
   @mutation()
   private UPDATE_HIDE_STYLE_BLOCKERS(windowId: string, hideStyleBlockers: boolean) {
     this.state[windowId].hideStyleBlockers = hideStyleBlockers;
+  }
+
+  @mutation()
+  private UPDATE_HIDE_CHAT(windowId: string, hideChat: boolean) {
+    this.state[windowId].hideChat = hideChat;
   }
 
   @mutation()

@@ -40,7 +40,7 @@ export default class NameScene extends Vue {
     } else if (this.options.itemsToGroup) {
       name = `${this.scenesService.activeScene.name} Group`;
     } else {
-      name = 'New Scene';
+      name = $t('New Scene');
     }
     if (!this.options.rename) this.name = this.sourcesService.suggestName(name);
   }
@@ -70,12 +70,11 @@ export default class NameScene extends Vue {
         };
       }
 
-      // TODO: Return values for executeCommand
-      const newSceneId = (await this.editorCommandsService.executeCommand(
+      const newSceneId = await this.editorCommandsService.executeCommand(
         'CreateSceneCommand',
         this.name,
         options,
-      )) as string;
+      );
 
       this.scenesService.getScene(newSceneId).makeActive();
 

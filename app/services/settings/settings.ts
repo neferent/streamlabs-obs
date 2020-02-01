@@ -41,6 +41,7 @@ export interface ISettingsState {
     key: string;
     streamType: string;
     service: string;
+    server: string;
   };
   Output: {
     RecRB?: boolean;
@@ -123,6 +124,7 @@ export class SettingsService extends StatefulService<ISettingsState>
       'Scene Collections',
       'Notifications',
       'Appearance',
+      'Face Masks',
       'Remote Control',
     ]);
 

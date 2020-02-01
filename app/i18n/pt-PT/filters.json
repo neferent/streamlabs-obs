@@ -9,7 +9,7 @@
   "Color Key": "Chave de Cor",
   "Apply LUT": "Aplicar LUT (Look Up Table)",
   "Sharpen": "Aperfeiçoamento",
-  "Chroma Key": "Chroma Key",
+  "Chroma Key": "Tecla Chroma",
   "Video Delay (Async)": "Atraso de vídeo (Async)",
   "Noise Suppression": "Supressão de ruído",
   "Noise Gate": "Filtro de Ruídos",
@@ -20,5 +20,10 @@
   "Filter name": "Nome do Filtro",
   "Add source filter": "Adicionar fonte de filtro",
   "No filters applied": "Nenhum filtro aplicado",
-  "Source filters": "Filtros de fonte"
+  "Source filters": "Filtros de fonte",
+  "Invert Polarity": "Invert Polarity",
+  "Limiter": "Limiter",
+  "Expander": "Expander",
+  "Shader": "Shader",
+  "No settings are available for this filter": "No settings are available for this filter"
 }

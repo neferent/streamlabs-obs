@@ -7,17 +7,18 @@ import { handleResponse, authorizedHeaders } from 'util/requests';
 import io from 'socket.io-client';
 import { Subject } from 'rxjs';
 import { AppService } from 'services/app';
+import { IRecentEvent } from 'services/recent-events';
 
 export type TSocketEvent =
   | IStreamlabelsSocketEvent
-  | IDonationSocketEvent
-  | IFacemaskDonationSocketEvent
-  | IFollowSocketEvent
-  | ISubscriptionSocketEvent
   | IAlertPlayingSocketEvent
   | IAlertProfileChanged
-  | IBitsSocketEvent
-  | IFmExtEnabledSocketEvent;
+  | IEventSocketEvent
+  | IFmExtEnabledSocketEvent
+  | IEventPanelSettingsChangedSocketEvent
+  | IMediaSharingSettingsUpdateSocketEvent
+  | IPauseEventQueueSocketEvent
+  | IUnpauseEventQueueSocketEvent;
 
 interface IStreamlabelsSocketEvent {
   type: 'streamlabels';
@@ -26,52 +27,30 @@ interface IStreamlabelsSocketEvent {
   };
 }
 
-interface IDonationSocketEvent {
-  type: 'donation';
-  message: {
-    name: string;
-    amount: string;
-    formattedAmount: string;
-    facemask: string;
-    message: string;
-  }[];
-}
-
-interface IFacemaskDonationSocketEvent {
-  type: 'facemaskdonation';
-  message: {
-    facemask: string;
-    _id: string;
-  }[];
-}
-
-interface IFollowSocketEvent {
-  type: 'follow';
-  message: {
-    name: string;
-    _id: string;
-  }[];
-}
-
-interface ISubscriptionSocketEvent {
-  type: 'subscription';
-  message: {
-    name: string;
-    subscriber_twitch_id?: string;
-    sub_plan?: string;
-    _id: string;
-  }[];
-}
-
-interface IBitsSocketEvent {
-  type: 'bits';
-  message: {
-    name: string;
-    data: {
-      facemask?: string;
-      fm_id?: string;
-    };
-  }[];
+export interface IEventSocketEvent {
+  type:
+    | 'merch'
+    | 'donation'
+    | 'facemaskdonation'
+    | 'follow'
+    | 'subscription'
+    | 'bits'
+    | 'host'
+    | 'raid'
+    | 'sticker'
+    | 'effect'
+    | 'like'
+    | 'stars'
+    | 'support'
+    | 'share'
+    | 'superchat'
+    | 'pledge'
+    | 'eldonation'
+    | 'tiltifydonation'
+    | 'donordrivedonation'
+    | 'justgivingdonation'
+    | 'treat';
+  message: IRecentEvent[];
 }
 
 interface IFmExtEnabledSocketEvent {
@@ -82,23 +61,37 @@ export interface IAlertPlayingSocketEvent {
   type: 'alertPlaying';
   message: {
     facemask?: string;
-    _id: string;
     type: string;
-    payload?: {
-      _id?: string;
-    };
-    data: {
-      facemask?: string;
-      fm_id?: string;
-    };
-    subscriber_twitch_id?: string;
-    sub_plan?: string;
-    name?: string;
+    amount?: string;
   };
 }
 
 interface IAlertProfileChanged {
   type: 'alertProfileChanged';
+}
+
+interface IPauseEventQueueSocketEvent {
+  type: 'pauseQueue';
+}
+
+interface IUnpauseEventQueueSocketEvent {
+  type: 'unpauseQueue';
+}
+
+interface IEventPanelSettingsChangedSocketEvent {
+  type: 'eventsPanelSettingsUpdate';
+  message: {
+    muted?: boolean;
+  };
+}
+
+interface IMediaSharingSettingsUpdateSocketEvent {
+  type: 'mediaSharingSettingsUpdate';
+  message: {
+    advanced_settings: {
+      enabled?: boolean;
+    };
+  };
 }
 
 export class WebsocketService extends Service {
@@ -111,8 +104,6 @@ export class WebsocketService extends Service {
   socketEvent = new Subject<TSocketEvent>();
 
   init() {
-    this.openSocketConnection();
-
     this.userService.userLogin.subscribe(() => {
       this.openSocketConnection();
     });

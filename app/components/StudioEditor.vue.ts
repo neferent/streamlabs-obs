@@ -1,4 +1,4 @@
-import Vue from 'vue';
+import TsxComponent from 'components/tsx-component';
 import { Component } from 'vue-property-decorator';
 import clamp from 'lodash/clamp';
 import { DragHandler } from 'util/DragHandler';
@@ -10,10 +10,13 @@ import { AnchorPoint, AnchorPositions, ScalableRectangle } from 'util/ScalableRe
 import { WindowsService } from 'services/windows';
 import { SelectionService, Selection } from 'services/selection';
 import Display from 'components/shared/Display.vue';
+import StudioModeControls from 'components/StudioModeControls.vue';
 import { TransitionsService } from 'services/transitions';
 import { CustomizationService } from 'services/customization';
 import { v2 } from '../util/vec2';
 import { EditorCommandsService } from 'services/editor-commands';
+import { ERenderingMode } from '../../obs-api';
+import { TObsFormData } from './obs/inputs/ObsInput';
 
 interface IResizeRegion {
   name: string;
@@ -33,9 +36,9 @@ interface IResizeOptions {
 }
 
 @Component({
-  components: { Display },
+  components: { Display, StudioModeControls },
 })
-export default class StudioEditor extends Vue {
+export default class StudioEditor extends TsxComponent {
   @Inject() private scenesService: ScenesService;
   @Inject() private windowsService: WindowsService;
   @Inject() private videoService: VideoService;
@@ -55,10 +58,50 @@ export default class StudioEditor extends Vue {
   currentY: number;
   isCropping: boolean;
   canDrag = true;
+  sizeCheckInterval: number;
+  stacked = false; // If the studio mode displays are horizontally or vertically oriented
+  verticalPlaceholder = false;
+  showDisplay = true;
 
   $refs: {
     display: HTMLDivElement;
+    studioModeContainer: HTMLDivElement; // Holds extra display for studio mode
+    placeholder: HTMLDivElement; // Holds placeholder image while resizing
   };
+
+  mounted() {
+    this.sizeCheckInterval = window.setInterval(() => {
+      if (this.$refs.studioModeContainer) {
+        const { clientWidth, clientHeight } = this.$refs.studioModeContainer;
+        this.showDisplay = clientHeight > 50;
+        if (this.studioMode) {
+          this.stacked = clientWidth / clientHeight <= 16 / 9;
+        }
+      }
+      if (!this.displayEnabled && !this.performanceMode && this.$refs.placeholder) {
+        const { clientWidth, clientHeight } = this.$refs.placeholder;
+        this.verticalPlaceholder = clientWidth / clientHeight < 16 / 9;
+      }
+    }, 1000);
+  }
+
+  destroyed() {
+    clearInterval(this.sizeCheckInterval);
+  }
+
+  get performanceMode() {
+    return this.customizationService.state.performanceMode;
+  }
+
+  enablePreview() {
+    this.customizationService.setSettings({ performanceMode: false });
+  }
+
+  get displayEnabled() {
+    return (
+      !this.windowsService.state.main.hideStyleBlockers && !this.performanceMode && this.showDisplay
+    );
+  }
 
   onOutputResize(region: IRectangle) {
     this.renderedWidth = region.width;
@@ -91,23 +134,23 @@ export default class StudioEditor extends Vue {
     }
 
     // prevent dragging if the clicking is past the source
-    if (!this.getOverSource(event)) this.canDrag = false;
+    if (!this.getOverSources(event).length) this.canDrag = false;
 
     this.updateCursor(event);
   }
 
   handleMouseDblClick(event: MouseEvent) {
-    const overSource = this.getOverSource(event);
+    const overSources = this.getOverSources(event);
 
-    if (!overSource) return;
+    if (!overSources.length) return;
 
-    const parent = overSource.getParent();
+    const parent = overSources[0].getParent();
 
     if (
       this.customizationService.getSettings().folderSelection &&
       (!parent || (parent && parent.isSelected()))
     ) {
-      this.selectionService.select(overSource.id);
+      this.selectionService.select(overSources[0].id);
     } else if (parent) {
       this.selectionService.select(parent.id);
     }
@@ -140,40 +183,60 @@ export default class StudioEditor extends Vue {
     // If neither a drag or resize was initiated, it must have been
     // an attempted selection or right click.
     if (!this.dragHandler && !this.resizeRegion) {
-      const overSource = this.getOverSource(event);
+      const overSources = this.getOverSources(event);
 
-      // Either select a new source, or deselect all sources
-      if (overSource) {
-        let overNode: TSceneNode = overSource;
-        if (this.customizationService.getSettings().folderSelection) {
-          overNode = overSource.hasParent() ? overSource.getParent() : overSource;
-        }
+      // Find out if we are over any currently selected sources
+      const overSelected = this.selectionService
+        .getItems()
+        .find(item => overSources.some(source => source.id === item.id));
 
-        if (event.ctrlKey) {
-          if (overNode.isSelected()) {
-            overNode.deselect();
-          } else {
-            overNode.addToSelection();
+      if (event.button === 0) {
+        if (overSources.length) {
+          let overNode: TSceneNode = overSources[0];
+          if (this.customizationService.getSettings().folderSelection) {
+            overNode = overSources[0].hasParent() ? overSources[0].getParent() : overSources[0];
           }
-        } else if (event.button === 0) {
-          overNode.select();
-        }
-      } else if (event.button === 0) {
-        this.selectionService.reset();
-      }
 
-      if (event.button === 2) {
+          // Ctrl adds or removes from a multiselection
+          if (event.ctrlKey) {
+            if (overNode.isSelected()) {
+              overNode.deselect();
+            } else {
+              overNode.addToSelection();
+            }
+          } else {
+            if (overSelected && overSources.length > 1) {
+              const currentIndex = overSources.findIndex(source => source.id === overSelected.id);
+
+              overSources[(currentIndex + 1) % overSources.length].select();
+            } else {
+              overNode.select();
+            }
+          }
+        } else {
+          // Click was not over any sources so empty the selection
+          this.selectionService.reset();
+        }
+      } else if (event.button === 2) {
         let menu: EditMenu;
-        if (overSource) {
-          this.selectionService.add(overSource.sceneItemId);
+
+        if (overSelected) {
           menu = new EditMenu({
             selectedSceneId: this.scene.id,
             showSceneItemMenu: true,
-            selectedSourceId: overSource.sourceId,
+            selectedSourceId: overSelected.sourceId,
+          });
+        } else if (overSources.length) {
+          this.selectionService.select(overSources[0].sceneItemId);
+          menu = new EditMenu({
+            selectedSceneId: this.scene.id,
+            showSceneItemMenu: true,
+            selectedSourceId: overSources[0].sourceId,
           });
         } else {
           menu = new EditMenu({ selectedSceneId: this.scene.id });
         }
+
         menu.popup();
       }
     }
@@ -381,7 +444,7 @@ export default class StudioEditor extends Vue {
       if (overResize) {
         this.$refs.display.style.cursor = overResize.cursor;
       } else {
-        const overSource = this.getOverSource(event);
+        const overSource = this.getOverSources(event)[0];
 
         if (overSource) {
           this.$refs.display.style.cursor = '-webkit-grab';
@@ -432,10 +495,10 @@ export default class StudioEditor extends Vue {
   }
 
   /**
-   * returns the source under the cursor
+   * returns the sources under the cursor
    */
-  private getOverSource(event: MouseEvent): SceneItem {
-    return this.sceneItems.find(source => {
+  private getOverSources(event: MouseEvent): SceneItem[] {
+    return this.sceneItems.filter(source => {
       return this.isOverSource(event, source);
     });
   }
@@ -511,6 +574,10 @@ export default class StudioEditor extends Vue {
     });
 
     return regions;
+  }
+
+  get renderingMode() {
+    return ERenderingMode.OBS_MAIN_RENDERING;
   }
 
   generateResizeRegionsForItem(item: SceneItem): IResizeRegion[] {

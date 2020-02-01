@@ -20,6 +20,7 @@ import { SceneCollectionsService } from 'services/scene-collections';
 import { IClipboardServiceApi } from './clipboard-api';
 import { EditorCommandsService } from 'services/editor-commands';
 import { IFilterData } from 'services/editor-commands/commands/paste-filters';
+import { NavigationService } from 'services/navigation';
 const { clipboard } = electron;
 
 interface ISceneNodeInfo {
@@ -53,7 +54,6 @@ interface IUnloadedCollectionClipboard {
 }
 
 interface ISystemClipboard {
-  text: string;
   files: string[];
 }
 
@@ -77,7 +77,6 @@ export class ClipboardService extends StatefulService<IClipboardState>
     sceneNodesIds: [],
     filterIds: [],
     systemClipboard: {
-      text: '',
       files: [],
     },
     unloadedCollectionClipboard: {
@@ -95,6 +94,7 @@ export class ClipboardService extends StatefulService<IClipboardState>
   @Inject() private selectionService: SelectionService;
   @Inject() private sceneCollectionsService: SceneCollectionsService;
   @Inject() private editorCommandsService: EditorCommandsService;
+  @Inject() private navigationService: NavigationService;
 
   init() {
     this.sceneCollectionsService.collectionWillSwitch.subscribe(() => {
@@ -111,6 +111,9 @@ export class ClipboardService extends StatefulService<IClipboardState>
 
   @shortcut('Ctrl+V')
   paste(duplicateSources = false) {
+    // Pasting sources only works in the editor
+    if (this.navigationService.state.currentPage !== 'Studio') return;
+
     const systemClipboard = this.fetchSystemClipboard();
     if (JSON.stringify(this.state.systemClipboard) !== JSON.stringify(systemClipboard)) {
       this.clear();
@@ -123,13 +126,12 @@ export class ClipboardService extends StatefulService<IClipboardState>
         return;
       }
 
-      // TODO: Return types for executeCommand
       const insertedItems = this.editorCommandsService.executeCommand(
         'CopyNodesCommand',
         this.scenesService.getScene(this.state.itemsSceneId).getSelection(this.state.sceneNodesIds),
         this.scenesService.activeSceneId,
         duplicateSources,
-      ) as TSceneNode[];
+      );
 
       if (insertedItems.length) this.selectionService.select(insertedItems);
     } else if (this.hasSystemClipboard()) {
@@ -137,15 +139,20 @@ export class ClipboardService extends StatefulService<IClipboardState>
     }
   }
 
-  copyFilters() {
-    const source = this.selectionService.getLastSelected();
+  copyFilters(sourceId?: string) {
+    const source = sourceId
+      ? this.sourcesService.getSource(sourceId)
+      : this.selectionService.getLastSelected();
+
     if (!source) return;
     this.SET_FILTERS_IDS([source.sourceId]);
     this.SET_UNLOADED_CLIPBOARD_FILTERS([]);
   }
 
-  pasteFilters() {
-    const source = this.selectionService.getItems()[0];
+  pasteFilters(sourceId?: string) {
+    const source = sourceId
+      ? this.sourcesService.getSource(sourceId)
+      : this.selectionService.getLastSelected();
     if (!source) return;
 
     const filterData: IFilterData[] = [];
@@ -187,7 +194,18 @@ export class ClipboardService extends StatefulService<IClipboardState>
   }
 
   hasSystemClipboard() {
-    return !!(this.state.systemClipboard.text || this.state.systemClipboard.files.length);
+    return !!this.state.systemClipboard.files.length;
+  }
+
+  canDuplicate(): boolean {
+    if (this.hasItemsInUnloadedClipboard()) return true;
+    if (!this.hasItems()) return false;
+    const hasNoduplicapableSource = this.scenesService
+      .getScene(this.state.itemsSceneId)
+      .getSelection(this.state.sceneNodesIds)
+      .getSources()
+      .some(source => source.doNotDuplicate);
+    return !hasNoduplicapableSource;
   }
 
   clear() {
@@ -200,9 +218,12 @@ export class ClipboardService extends StatefulService<IClipboardState>
 
   private fetchSystemClipboard(): ISystemClipboard {
     let files: string[] = [];
+
+    // We ignore text on the system clipboard, but we should only
+    // try to find files if there is no text.
     const text = clipboard.readText() || '';
     if (!text) files = this.getFiles();
-    return { text, files };
+    return { files };
   }
 
   private pasteItemsFromUnloadedClipboard() {
@@ -318,17 +339,6 @@ export class ClipboardService extends StatefulService<IClipboardState>
     if (clipboard.files.length) {
       clipboard.files.forEach(filePath => scene.addFile(filePath));
       return;
-    }
-    const urlRegex = /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{2,256}\.[a-z]{2,6}\b([-a-zA-Z0-9@:%_\+.~#?&//=]*)/;
-    const text = clipboard.text;
-
-    if (text.match(urlRegex)) {
-      scene.createAndAddSource(text, 'browser_source', {
-        url: text,
-        is_local_file: false,
-      });
-    } else {
-      scene.createAndAddSource(text, 'text_gdiplus', { text });
     }
   }
 

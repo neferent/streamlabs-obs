@@ -62,6 +62,8 @@ export class SceneBuilder {
   }
 
   parse(sketch: string): ISceneBuilderNode[] {
+    if (sketch === '') return [];
+
     let strings = sketch.split('\n');
     let offset = -1;
 
@@ -206,6 +208,12 @@ export class SceneBuilder {
 
       if (node.type === 'item') {
         sceneNode = this.scene.createAndAddSource(node.name, node.sourceType);
+
+        if (node.sourceType === 'color_source') {
+          this.scene.getItem(sceneNode.id)
+            .getSource()
+            .updateSettings({ width: 400, height: 400 });
+        }
       } else {
         sceneNode = this.scene.createFolder(node.name);
         if (node.children.length) this.buildNodes(node.children, sceneNode.id);

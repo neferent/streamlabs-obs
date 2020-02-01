@@ -146,8 +146,7 @@ export class Scene {
 
     const sceneItemId = options.id || uuid();
 
-    let obsSceneItem: obs.ISceneItem;
-    obsSceneItem = this.getObsScene().add(source.getObsInput());
+    const obsSceneItem: obs.ISceneItem = this.getObsScene().add(source.getObsInput());
 
     this.ADD_SOURCE_TO_SCENE(sceneItemId, source.sourceId, obsSceneItem.id);
     const sceneItem = this.getItem(sceneItemId);
@@ -304,20 +303,12 @@ export class Scene {
    * Makes sure all scene items are in the correct order in OBS.
    */
   private reconcileNodeOrderWithObs() {
-    const obsScene = this.getObsScene();
-    const destOrder = this.getItems().map(item => item.obsSceneItemId);
-    const currentOrder = this.getObsScene()
-      .getItems()
-      .reverse()
-      .map(item => item.id);
-
-    destOrder.forEach(ind => {
-      if (destOrder[ind] === currentOrder[ind]) return;
-      const itemToMoveInd = currentOrder.indexOf(destOrder[ind]);
-      const itemToMove = currentOrder[itemToMoveInd];
-      currentOrder.splice(itemToMoveInd, 1);
-      currentOrder.splice(ind, 0, itemToMove);
-      obsScene.moveItem(itemToMoveInd, ind);
+    this.getItems().forEach((item, index) => {
+      const currentIndex = this.getObsScene()
+        .getItems()
+        .reverse()
+        .findIndex(obsItem => obsItem.id === item.obsSceneItemId);
+      this.getObsScene().moveItem(currentIndex, index);
     });
   }
 
@@ -353,6 +344,8 @@ export class Scene {
         y: sceneNode.y == null ? 0 : sceneNode.y,
         locked: sceneNode.locked,
         rotation: sceneNode.rotation || 0,
+        streamVisible: sceneNode.streamVisible,
+        recordingVisible: sceneNode.recordingVisible,
       });
       return true;
     });
@@ -502,6 +495,8 @@ export class Scene {
 
       visible: true,
       locked: false,
+      streamVisible: true,
+      recordingVisible: true,
     });
   }
 

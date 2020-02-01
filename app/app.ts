@@ -1,5 +1,6 @@
-import { I18nService } from 'services/i18n';
+import { I18nService, $t } from 'services/i18n';
 
+// eslint-disable-next-line
 window['eval'] = global.eval = () => {
   throw new Error('window.eval() is disabled for security');
 };
@@ -9,10 +10,12 @@ import Vue from 'vue';
 
 import { createStore } from './store';
 import { WindowsService } from './services/windows';
+import { ObsUserPluginsService } from 'services/obs-user-plugins';
 import { AppService } from './services/app';
 import Utils from './services/utils';
 import electron from 'electron';
 import * as Sentry from '@sentry/browser';
+import * as Integrations from '@sentry/integrations';
 import VTooltip from 'v-tooltip';
 import Toasted from 'vue-toasted';
 import VueI18n from 'vue-i18n';
@@ -23,6 +26,11 @@ import OneOffWindow from 'components/windows/OneOffWindow.vue';
 import electronLog from 'electron-log';
 import { UserService, setSentryContext } from 'services/user';
 import { getResource } from 'services';
+import * as obs from '../obs-api';
+import path from 'path';
+import uuid from 'uuid/v4';
+
+const crashHandler = window['require']('crash-handler');
 
 const { ipcRenderer, remote } = electron;
 const slobsVersion = remote.process.env.SLOBS_VERSION;
@@ -43,7 +51,7 @@ if (isProduction) {
     submitURL:
       'https://sentry.io/api/1283430/minidump/?sentry_key=01fc20f909124c8499b4972e9a5253f2',
     extra: {
-      version: slobsVersion,
+      'sentry[release]': slobsVersion,
       processType: 'renderer',
     },
   });
@@ -72,15 +80,19 @@ if (
         return splitArray[splitArray.length - 1];
       };
 
-      if (event.exception) {
+      if (event.exception && event.exception.values[0].stacktrace) {
         event.exception.values[0].stacktrace.frames.forEach(frame => {
           frame.filename = normalize(frame.filename);
         });
       }
 
+      if (event.request) {
+        event.request.url = normalize(event.request.url);
+      }
+
       return event;
     },
-    integrations: [new Sentry.Integrations.Vue({ Vue })],
+    integrations: [new Integrations.Vue({ Vue })],
   });
 
   const oldConsoleError = console.error;
@@ -114,11 +126,70 @@ document.addEventListener('dragover', event => event.preventDefault());
 document.addEventListener('dragenter', event => event.preventDefault());
 document.addEventListener('drop', event => event.preventDefault());
 
+export const apiInitErrorResultToMessage = (resultCode: obs.EVideoCodes) => {
+  switch (resultCode) {
+    case obs.EVideoCodes.NotSupported: {
+      return $t('OBSInit.NotSupportedError');
+    }
+    case obs.EVideoCodes.ModuleNotFound: {
+      return $t('OBSInit.ModuleNotFoundError');
+    }
+    default: {
+      return $t('OBSInit.UnknownError');
+    }
+  }
+};
+
+const showDialog = (message: string): void => {
+  electron.remote.dialog.showErrorBox($t('OBSInit.ErrorTitle'), message);
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   createStore().then(async store => {
-    // handle closeWindow event from the main process
     const windowsService: WindowsService = WindowsService.instance;
+
     if (Utils.isMainWindow()) {
+      // Services
+      const appService: AppService = AppService.instance;
+      const obsUserPluginsService: ObsUserPluginsService = ObsUserPluginsService.instance;
+
+      // This is used for debugging
+      window['obs'] = obs;
+
+      // Host a new OBS server instance
+      obs.IPC.host(`slobs-${uuid()}`);
+      obs.NodeObs.SetWorkingDirectory(
+        path.join(
+          electron.remote.app.getAppPath().replace('app.asar', 'app.asar.unpacked'),
+          'node_modules',
+          'obs-studio-node',
+        ),
+      );
+
+      crashHandler.registerProcess(appService.pid, false);
+
+      await obsUserPluginsService.initialize();
+
+      // Initialize OBS API
+      const apiResult = obs.NodeObs.OBS_API_initAPI(
+        'en-US',
+        appService.appDataDirectory,
+        electron.remote.process.env.SLOBS_VERSION,
+      );
+
+      if (apiResult !== obs.EVideoCodes.Success) {
+        const message = apiInitErrorResultToMessage(apiResult);
+        showDialog(message);
+
+        crashHandler.unregisterProcess(appService.pid);
+
+        obs.NodeObs.StopCrashHandler();
+        obs.IPC.disconnect();
+
+        electron.ipcRenderer.send('shutdownComplete');
+        return;
+      }
+
       ipcRenderer.on('closeWindow', () => windowsService.closeMainWindow());
       AppService.instance.load();
     } else {
@@ -143,7 +214,10 @@ document.addEventListener('DOMContentLoaded', () => {
       locale: i18nService.state.locale,
       fallbackLocale: i18nService.getFallbackLocale(),
       messages: i18nService.getLoadedDictionaries(),
-      silentTranslationWarn: true,
+      missing: (language: string, key: string) => {
+        if (isProduction) return;
+        console.error(`Missing translation found for ${language} -- "${key}"`);
+      },
     });
     I18nService.setVuei18nInstance(i18n);
 
@@ -167,6 +241,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 if (Utils.isDevMode()) {
   window.addEventListener('error', () => ipcRenderer.send('showErrorAlert'));
+  window.addEventListener('keyup', ev => {
+    if (ev.key === 'F12') electron.ipcRenderer.send('openDevTools');
+  });
 }
 
 // ERRORS LOGGING
@@ -177,8 +254,6 @@ electronLog.catchErrors({ onError: e => electronLog.log(`from ${Utils.getWindowI
 // override console.error
 const consoleError = console.error;
 console.error = function(...args: any[]) {
-  // TODO: Suppress N-API error until we upgrade electron to v4.x
-  if (/N\-API is an experimental feature/.test(args[0])) return;
   if (Utils.isDevMode()) ipcRenderer.send('showErrorAlert');
   writeErrorToLog(...args);
   consoleError.call(console, ...args);

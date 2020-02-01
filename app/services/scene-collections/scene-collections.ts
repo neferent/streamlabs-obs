@@ -34,6 +34,7 @@ import { Subject } from 'rxjs';
 import { TransitionsService } from 'services/transitions';
 import { $t } from '../i18n';
 import { StreamingService, EStreamingState } from 'services/streaming';
+import { DefaultHardwareService } from 'services/hardware';
 
 const uuid = window['require']('uuid/v4');
 
@@ -53,6 +54,8 @@ interface ISceneCollectionInternalCreateOptions extends ISceneCollectionCreateOp
    * This should really only be used by the OBS importer.
    */
   setupFunction?: () => boolean;
+
+  auto?: boolean;
 }
 
 const DEFAULT_COLLECTION_NAME = 'Scenes';
@@ -77,17 +80,13 @@ export class SceneCollectionsService extends Service implements ISceneCollection
   @Inject() tcpServerService: TcpServerService;
   @Inject() transitionsService: TransitionsService;
   @Inject() streamingService: StreamingService;
+  @Inject() private defaultHardwareService: DefaultHardwareService;
 
   collectionAdded = new Subject<ISceneCollectionsManifestEntry>();
   collectionRemoved = new Subject<ISceneCollectionsManifestEntry>();
   collectionSwitched = new Subject<ISceneCollectionsManifestEntry>();
   collectionWillSwitch = new Subject<void>();
   collectionUpdated = new Subject<ISceneCollectionsManifestEntry>();
-
-  /**
-   * Whether the service has been initialized
-   */
-  private initialized = false;
 
   /**
    * Whether a valid collection is currently loaded.
@@ -123,9 +122,8 @@ export class SceneCollectionsService extends Service implements ISceneCollection
 
       await this.load(latestId);
     } else {
-      await this.create();
+      await this.create({ auto: true });
     }
-    this.initialized = true;
   }
 
   /**
@@ -133,6 +131,7 @@ export class SceneCollectionsService extends Service implements ISceneCollection
    * scene collections backed up on the server, it will reset
    * the manifest and load from the server.
    */
+  @RunInLoadingMode()
   async setupNewUser() {
     await this.initialize();
   }
@@ -180,7 +179,9 @@ export class SceneCollectionsService extends Service implements ISceneCollection
         await this.attemptRecovery(id);
       } else {
         console.warn(`Unsuccessful recovery of scene collection ${id} attempted`);
-        alert('Failed to load scene collection.  A new one will be created instead.');
+        electron.remote.dialog.showMessageBox({
+          message: $t('Failed to load scene collection.  A new one will be created instead.'),
+        });
         await this.create();
       }
     }
@@ -201,7 +202,7 @@ export class SceneCollectionsService extends Service implements ISceneCollection
     const name = options.name || this.suggestName(DEFAULT_COLLECTION_NAME);
     const id = uuid();
 
-    await this.insertCollection(id, name);
+    await this.insertCollection(id, name, options.auto || false);
     await this.setActiveCollection(id);
     if (options.needsRename) this.stateService.SET_NEEDS_RENAME(id);
 
@@ -227,7 +228,7 @@ export class SceneCollectionsService extends Service implements ISceneCollection
     const removingActiveCollection = id === this.activeCollection.id;
 
     if (removingActiveCollection) {
-      this.appService.runInLoadingMode(async () => {
+      await this.appService.runInLoadingMode(async () => {
         await this.removeCollection(id);
 
         if (this.collections.length > 0) {
@@ -261,6 +262,8 @@ export class SceneCollectionsService extends Service implements ISceneCollection
    * Instead, it will log an error and continue.
    */
   async safeSync(retries = 2) {
+    if (!this.canSync()) return;
+
     if (this.syncPending) {
       console.error(
         'Unable to start the scenes-collection sync process while prev process is not finished',
@@ -271,12 +274,13 @@ export class SceneCollectionsService extends Service implements ISceneCollection
     this.syncPending = true;
     try {
       await this.sync();
+      this.syncPending = false;
     } catch (e) {
+      this.syncPending = false;
+
       console.error(`Scene collection sync failed (Attempt ${3 - retries}/3)`, e);
       if (retries > 0) await this.safeSync(retries - 1);
     }
-
-    this.syncPending = false;
   }
 
   /**
@@ -290,8 +294,7 @@ export class SceneCollectionsService extends Service implements ISceneCollection
     // tslint:disable-next-line:no-parameter-reassignment TODO
     id = id || this.activeCollection.id;
     const newId = uuid();
-    await this.stateService.copyCollectionFile(id, newId);
-    await this.insertCollection(newId, name);
+    await this.insertCollection(newId, name, false, id);
     this.stateService.SET_NEEDS_RENAME(newId);
     this.enableAutoSave();
   }
@@ -302,7 +305,7 @@ export class SceneCollectionsService extends Service implements ISceneCollection
    * @param name the name of the overlay
    * @param progressCallback a callback that receives progress of the download
    */
-  @RunInLoadingMode()
+  @RunInLoadingMode({ hideStyleBlockers: false })
   async installOverlay(
     url: string,
     name: string,
@@ -539,8 +542,6 @@ export class SceneCollectionsService extends Service implements ISceneCollection
    * performed while the application is already in a "LOADING" state.
    */
   private async deloadCurrentApplicationState() {
-    if (!this.initialized) return;
-
     this.tcpServerService.stopRequestsHandling();
 
     this.collectionWillSwitch.next();
@@ -565,6 +566,8 @@ export class SceneCollectionsService extends Service implements ISceneCollection
 
       this.transitionsService.deleteAllTransitions();
       this.transitionsService.deleteAllConnections();
+
+      this.streamingService.setSelectiveRecording(false);
     } catch (e) {
       console.error('Error deloading application state', e);
     }
@@ -593,21 +596,29 @@ export class SceneCollectionsService extends Service implements ISceneCollection
       {},
       { channel: E_AUDIO_CHANNELS.OUTPUT_1 },
     );
-
+    const defaultId = this.defaultHardwareService.state.defaultAudioDevice
+      ? this.defaultHardwareService.state.defaultAudioDevice
+      : undefined;
     this.sourcesService.createSource(
       'Mic/Aux',
       'wasapi_input_capture',
-      {},
+      { device_id: defaultId },
       { channel: E_AUDIO_CHANNELS.INPUT_1 },
     );
   }
 
   /**
    * Creates and persists new collection from the current application state
+   * or from another scene collection's contents.
    */
-  private async insertCollection(id: string, name: string) {
-    await this.saveCurrentApplicationStateAs(id);
-    this.stateService.ADD_COLLECTION(id, name, new Date().toISOString());
+  private async insertCollection(id: string, name: string, auto = false, fromId?: string) {
+    if (fromId) {
+      await this.stateService.copyCollectionFile(fromId, id);
+    } else {
+      await this.saveCurrentApplicationStateAs(id);
+    }
+
+    this.stateService.ADD_COLLECTION(id, name, new Date().toISOString(), auto);
     await this.safeSync();
     this.collectionAdded.next(this.collections.find(coll => coll.id === id));
   }
@@ -770,19 +781,29 @@ export class SceneCollectionsService extends Service implements ISceneCollection
       // We already dealt with the overlap above
       if (!onServer) {
         if (!inManifest.serverId) {
-          const success = await this.performSyncStep('Insert on server', async () => {
-            const data = this.stateService.readCollectionFile(inManifest.id);
-
-            const response = await this.serverApi.createSceneCollection({
-              data,
-              name: inManifest.name,
-              last_updated_at: inManifest.modified,
+          // Delete any auto collections if there are any collections that were
+          // downloaded from the server.
+          if (serverCollections.length && inManifest.auto) {
+            const success = this.performSyncStep('Delete from server', async () => {
+              this.stateService.HARD_DELETE_COLLECTION(inManifest.id);
             });
 
-            this.stateService.SET_SERVER_ID(inManifest.id, response.id);
-          });
+            if (!success) failed = true;
+          } else {
+            const success = await this.performSyncStep('Insert on server', async () => {
+              const data = this.stateService.readCollectionFile(inManifest.id);
 
-          if (!success) failed = true;
+              const response = await this.serverApi.createSceneCollection({
+                data,
+                name: inManifest.name,
+                last_updated_at: inManifest.modified,
+              });
+
+              this.stateService.SET_SERVER_ID(inManifest.id, response.id);
+            });
+
+            if (!success) failed = true;
+          }
         } else {
           const success = this.performSyncStep('Delete from server', async () => {
             this.stateService.HARD_DELETE_COLLECTION(inManifest.id);

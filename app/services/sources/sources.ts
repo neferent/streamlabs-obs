@@ -30,7 +30,7 @@ import { $t } from 'services/i18n';
 import { SourceDisplayData } from './sources-data';
 import { NavigationService } from 'services/navigation';
 import { PlatformAppsService } from 'services/platform-apps';
-import { HardwareService } from 'services/hardware';
+import { HardwareService, DefaultHardwareService } from 'services/hardware';
 import { AudioService } from '../audio';
 import { ReplayManager } from './properties-managers/replay-manager';
 
@@ -72,6 +72,7 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
   @Inject() private platformAppsService: PlatformAppsService;
   @Inject() private hardwareService: HardwareService;
   @Inject() private audioService: AudioService;
+  @Inject() private defaultHardwareService: DefaultHardwareService;
 
   /**
    * Maps a source id to a property manager
@@ -262,7 +263,10 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
           looping: true,
         };
       } else if (type === 'text_gdiplus') {
-        settings = { text: fs.readFileSync(path).toString() };
+        settings = {
+          read_from_file: true,
+          file: path,
+        };
       }
       return this.createSource(filename, type as TSourceType, settings);
     }
@@ -314,9 +318,18 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       }
     }
 
-    if (type === 'text_gdiplus') {
-      if (resolvedSettings.text === void 0) resolvedSettings.text = name;
+    if (type === 'text_gdiplus' && resolvedSettings.text === void 0) {
+      resolvedSettings.text = name;
     }
+
+    if (
+      type === 'dshow_input' &&
+      resolvedSettings.video_device_id === void 0 &&
+      this.defaultHardwareService.state.defaultVideoDevice
+    ) {
+      resolvedSettings.video_device_id = this.defaultHardwareService.state.defaultVideoDevice;
+    }
+
     return resolvedSettings;
   }
 
@@ -461,6 +474,8 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       WidgetType.BitGoal,
       WidgetType.DonationGoal,
       WidgetType.FollowerGoal,
+      WidgetType.StarsGoal,
+      WidgetType.SupporterGoal,
       WidgetType.ChatBox,
       WidgetType.ViewerCount,
       WidgetType.DonationTicker,
@@ -472,6 +487,7 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       WidgetType.MediaShare,
       WidgetType.SponsorBanner,
       WidgetType.AlertBox,
+      WidgetType.SpinWheel,
     ];
 
     if (isWidget && this.userService.isLoggedIn()) {
@@ -484,7 +500,7 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
           title: $t('Settings for ') + WidgetDisplayData()[widgetType].name,
           queryParams: { sourceId },
           size: {
-            width: 900,
+            width: 920,
             height: 1024,
           },
         });
@@ -517,9 +533,13 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       }
     }
 
+    let propertiesName = SourceDisplayData()[source.type].name;
+    if (propertiesManagerType === 'replay') propertiesName = $t('Instant Replay');
+    if (propertiesManagerType === 'streamlabels') propertiesName = $t('Stream Label');
+
     this.windowsService.showWindow({
       componentName: 'SourceProperties',
-      title: $t('Settings for ') + SourceDisplayData()[source.type].name,
+      title: $t('Settings for %{sourceName}', { sourceName: propertiesName }),
       queryParams: { sourceId },
       size: {
         width: 600,
@@ -546,7 +566,7 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       queryParams: { sourceType, sourceAddOptions },
       size: {
         width: 600,
-        height: 540,
+        height: 320,
       },
     });
   }
@@ -559,6 +579,26 @@ export class SourcesService extends StatefulService<ISourcesState> implements IS
       size: {
         width: 400,
         height: 250,
+      },
+    });
+  }
+
+  /**
+   * Show a window for interacting with a browser source.
+   * This function does nothing if the source is not a browser source.
+   */
+  showInteractWindow(sourceId: string) {
+    const source = this.getSourceById(sourceId);
+
+    if (source.type !== 'browser_source') return;
+
+    this.windowsService.showWindow({
+      componentName: 'BrowserSourceInteraction',
+      queryParams: { sourceId },
+      title: $t('Interact: %{sourceName}', { sourceName: source.name }),
+      size: {
+        width: 800,
+        height: 600,
       },
     });
   }

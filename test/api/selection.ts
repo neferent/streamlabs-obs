@@ -1,4 +1,4 @@
-import { useSpectron, test } from '../helpers/spectron';
+import { useSpectron, test, afterAppStart } from '../helpers/spectron';
 import { getClient } from '../helpers/api-client';
 import { ScenesService } from 'services/scenes';
 import { SelectionService } from '../../app/services/selection';
@@ -6,7 +6,7 @@ import { SceneBuilder } from '../helpers/scene-builder';
 import { Scene, SceneItemNode } from 'services/scenes';
 import { sleep } from '../helpers/sleep';
 
-useSpectron({ restartAppAfterEachTest: false, afterStartCb: afterStart });
+useSpectron({ restartAppAfterEachTest: false });
 
 let sceneBuilder: SceneBuilder;
 let scene: Scene;
@@ -14,14 +14,14 @@ let getNode: (name: string) => SceneItemNode;
 let getNodeId: (name: string) => string;
 let selectionService: SelectionService;
 
-async function afterStart() {
+afterAppStart(async t => {
   const client = await getClient();
   selectionService = client.getResource('SelectionService');
   sceneBuilder = new SceneBuilder(client);
   scene = sceneBuilder.scene;
   getNode = name => scene.getNodeByName(name);
   getNodeId = name => scene.getNodeByName(name).id;
-}
+});
 
 test('Selection', async t => {
   const client = await getClient();
@@ -283,4 +283,28 @@ test('Scale', async t => {
     y: 0.25
   });
 
+});
+
+test('isSceneFolder', async t => {
+  sceneBuilder.build(`
+    Folder1
+    Folder2
+      Folder3
+        Item3:
+  `);
+
+  selectionService.selectAll();
+  t.false(selectionService.isSceneFolder());
+
+  selectionService.select([getNodeId('Folder1')]);
+  t.true(selectionService.isSceneFolder());
+
+  selectionService.select([getNodeId('Folder2')]);
+  t.true(selectionService.isSceneFolder());
+
+  selectionService.select([getNodeId('Folder3')]);
+  t.true(selectionService.isSceneFolder());
+
+  selectionService.select([getNodeId('Item3')]);
+  t.false(selectionService.isSceneFolder());
 });

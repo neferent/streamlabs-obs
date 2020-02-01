@@ -8,9 +8,10 @@ import TransitionSettings from 'components/TransitionSettings.vue';
 import { $t } from 'services/i18n';
 import Tabs, { ITab } from 'components/Tabs.vue';
 import { ScenesService } from 'services/scenes';
-import ConnectionSettings from 'components/ConnectionSettings.vue';
+import ConnectionSettings from 'components/ConnectionSettings';
 import VModal from 'vue-js-modal';
 import { EditorCommandsService } from 'services/editor-commands';
+import electron from 'electron';
 
 Vue.use(VModal);
 
@@ -105,7 +106,9 @@ export default class SceneTransitions extends Vue {
 
   deleteTransition(id: string) {
     if (this.transitionsService.state.transitions.length === 1) {
-      alert($t('You need at least 1 transition.'));
+      electron.remote.dialog.showMessageBox({
+        message: $t('You need at least 1 transition.'),
+      });
       return;
     }
 
@@ -123,13 +126,12 @@ export default class SceneTransitions extends Vue {
   }
 
   addConnection() {
-    // TODO: Return types for executeCommand
     const connection = this.editorCommandsService.executeCommand(
       'CreateConnectionCommand',
       this.scenesService.scenes[0].id,
       this.scenesService.scenes[1].id,
       this.transitions[0].id,
-    ) as ITransitionConnection;
+    );
 
     this.editConnection(connection.id);
   }

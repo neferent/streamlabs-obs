@@ -14,6 +14,10 @@ interface II18nState {
   locale: string;
 }
 
+/**
+ * get localized string from dictionary
+ * throw an error if string is not in the dictionary
+ */
 export function $t(...args: any[]): string {
   const vueI18nInstance = I18nService.vueI18nInstance;
 
@@ -21,6 +25,16 @@ export function $t(...args: any[]): string {
   if (!vueI18nInstance) return args[0];
 
   return vueI18nInstance.t.call(I18nService.vueI18nInstance, ...args);
+}
+
+/**
+ * get localized string from dictionary if exists
+ * returns a keypath if localized version of string doesn't exist
+ */
+export function $translateIfExist(str: string): string {
+  const vueI18nInstance = I18nService.vueI18nInstance;
+  if (vueI18nInstance.te(str)) return $t(str);
+  return str;
 }
 
 /**
@@ -76,14 +90,14 @@ export class I18nService extends PersistentStatefulService<II18nState> implement
     I18nService.vueI18nInstance = instance;
   }
 
-  static setWebviewLocale(webview: Electron.WebviewTag) {
-    if (!webview) return;
+  static setBrowserViewLocale(view: Electron.BrowserView) {
+    if (!view) return;
 
-    // use a static method here because it allows to accept unserializable arguments like webview from other windows
+    // use a static method here because it allows to accept unserializable arguments like browserview from other windows
     const i18nService = I18nService.instance as I18nService; // TODO: replace with getResource('I18nService')
     const locale = i18nService.state.locale;
-    webview.addEventListener('dom-ready', () => {
-      webview.executeJavaScript(`
+    view.webContents.on('dom-ready', () => {
+      view.webContents.executeJavaScript(`
         var langCode = $.cookie('langCode');
         if (langCode !== '${locale}') {
            $.cookie('langCode', '${locale}');
@@ -153,7 +167,7 @@ export class I18nService extends PersistentStatefulService<II18nState> implement
 
   setLocale(locale: string) {
     this.SET_LOCALE(locale);
-    electron.remote.app.relaunch();
+    electron.remote.app.relaunch({ args: [] });
     electron.remote.app.quit();
   }
 
@@ -191,12 +205,18 @@ export class I18nService extends PersistentStatefulService<II18nState> implement
       .filter(fileName => fileName.split('.')[1] === 'json');
 
     const dictionary: Dictionary<string> = {};
+
     for (const fileName of dictionaryFiles) {
-      Object.assign(
-        dictionary,
-        JSON.parse(this.fileManagerService.read(`${i18nPath}/${locale}/${fileName}`)),
-      );
+      const filePath = `${i18nPath}/${locale}/${fileName}`;
+      let json: Dictionary<string>;
+      try {
+        json = JSON.parse(this.fileManagerService.read(filePath));
+      } catch (e) {
+        throw new Error(`Invalid JSON in ${filePath}`);
+      }
+      Object.assign(dictionary, json);
     }
+
     this.loadedDictionaries[locale] = dictionary;
     return dictionary;
   }

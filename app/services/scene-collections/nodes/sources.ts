@@ -5,6 +5,7 @@ import { AudioService } from 'services/audio';
 import { Inject } from '../../core/injector';
 import * as obs from '../../../../obs-api';
 import { ScenesService } from 'services/scenes';
+import defaultTo from 'lodash/defaultTo';
 
 interface ISchema {
   items: ISourceInfo[];
@@ -42,7 +43,7 @@ export interface ISourceInfo {
 }
 
 export class SourcesNode extends Node<ISchema, {}> {
-  schemaVersion = 3;
+  schemaVersion = 4;
 
   @Inject() private sourcesService: SourcesService;
   @Inject() private audioService: AudioService;
@@ -169,6 +170,7 @@ export class SourcesNode extends Node<ISchema, {}> {
         muted: source.muted || false,
         settings: source.settings,
         volume: source.volume,
+        syncOffset: source.syncOffset,
         filters: source.filters.items.map(filter => {
           return {
             name: filter.name,
@@ -200,11 +202,19 @@ export class SourcesNode extends Node<ISchema, {}> {
         this.audioService
           .getSource(sourceInfo.id)
           .setMul(sourceInfo.volume != null ? sourceInfo.volume : 1);
+
+        const defaultMonitoring =
+          (source.id as TSourceType) === 'browser_source'
+            ? obs.EMonitoringType.MonitoringOnly
+            : obs.EMonitoringType.None;
+
         this.audioService.getSource(sourceInfo.id).setSettings({
-          forceMono: sourceInfo.forceMono,
-          syncOffset: sourceInfo.syncOffset ? AudioService.timeSpecToMs(sourceInfo.syncOffset) : 0,
-          audioMixers: sourceInfo.audioMixers,
-          monitoringType: sourceInfo.monitoringType,
+          forceMono: defaultTo(sourceInfo.forceMono, false),
+          syncOffset: AudioService.timeSpecToMs(
+            defaultTo(sourceInfo.syncOffset, { sec: 0, nsec: 0 }),
+          ),
+          audioMixers: defaultTo(sourceInfo.audioMixers, 255),
+          monitoringType: defaultTo(sourceInfo.monitoringType, defaultMonitoring),
         });
         this.audioService.getSource(sourceInfo.id).setHidden(!!sourceInfo.mixerHidden);
       }
@@ -237,6 +247,17 @@ export class SourcesNode extends Node<ISchema, {}> {
           // tslint:disable-next-line:prefer-template
           source.name = 'Mic/Aux' + (index > 1 ? ' ' + index : '');
           return;
+        }
+      });
+    }
+
+    // Migrate media sources to turn off HW decoding. This property previously
+    // had no effect and now it does, so to make sure nothing changes, we are
+    // reverting this flag to false for everyone.
+    if (version < 4) {
+      this.data.items.forEach(source => {
+        if (source.type === 'ffmpeg_source') {
+          source.settings.hw_decode = false;
         }
       });
     }

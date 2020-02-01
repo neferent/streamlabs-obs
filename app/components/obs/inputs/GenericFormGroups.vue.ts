@@ -1,36 +1,46 @@
 import Vue from 'vue';
-import GenericForm from './GenericForm.vue';
+import GenericForm from './GenericForm';
 import AdvancedOutputTabs from './AdvancedOutputTabs.vue';
 import { Component, Prop, Watch } from 'vue-property-decorator';
 import { ISettingsSubCategory, SettingsService } from '../../../services/settings';
 import { Inject } from 'services/core/injector';
+import TsxComponent, { createProps } from 'components/tsx-component';
+
+class GenericFormGroupProps {
+  value: ISettingsSubCategory[] = null;
+  categoryName?: string = '';
+  onInput?: (value: any) => void = () => {};
+}
 
 @Component({
   components: { AdvancedOutputTabs, GenericForm },
+  props: createProps(GenericFormGroupProps),
 })
-export default class GenericFormGroups extends Vue {
+export default class GenericFormGroups extends TsxComponent<GenericFormGroupProps> {
   @Inject() settingsService: SettingsService;
-
-  @Prop() value: ISettingsSubCategory[];
-  @Prop() categoryName: string;
 
   collapsedGroups: Dictionary<boolean> = {};
 
-  isAdvancedOutput = this.settingsService.isTabbedForm(this.categoryName) || false;
+  isAdvancedOutput = false;
+
+  created() {
+    this.isAdvancedOutput = this.settingsService.isTabbedForm(this.props.categoryName);
+  }
 
   toggleGroup(index: string) {
     this.$set(this.collapsedGroups, index, !this.collapsedGroups[index]);
   }
 
   onInputHandler() {
-    this.$emit('input', this.value);
+    if (this.props.onInput) this.props.onInput(this.props.value);
+    this.$emit('input', this.props.value);
 
     this.$nextTick(this.updateIsAdvancedOutput);
   }
 
   @Watch('categoryName')
   updateIsAdvancedOutput() {
-    this.isAdvancedOutput = this.settingsService.isTabbedForm(this.categoryName);
+    this.isAdvancedOutput = this.settingsService.isTabbedForm(this.props.categoryName);
   }
 
   hasAnyVisibleSettings(category: ISettingsSubCategory) {

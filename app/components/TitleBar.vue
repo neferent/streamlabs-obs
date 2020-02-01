@@ -6,7 +6,7 @@
   </div>
   <div class="titlebar-actions">
     <i class="icon-subtract titlebar-action" @click="minimize" />
-    <i class="icon-expand-1 titlebar-action" @click="maximize" />
+    <i v-if="isMaximizable" class="icon-expand-1 titlebar-action" @click="maximize" />
     <i class="icon-close titlebar-action" @click="close" />
   </div>
 </div>
@@ -23,7 +23,7 @@
   align-items: center;
   height: 30px;
   flex: 0 0 30px;
-  border-bottom: 1px solid var(--border);
+  background: var(--titlebar);
 }
 
 .titlebar-icon {
@@ -35,6 +35,7 @@
   flex-grow: 1;
   padding-left: 10px;
   -webkit-app-region: drag;
+  color: var(--icon);
 }
 
 .titlebar-actions {
